@@ -199,7 +199,8 @@ namespace SQLBulkCopy
 
         private void btnGetSqlSchema_Click(object sender, EventArgs e)
         {
-            _sqlSchema = GetTableSchema("DemoUsers");
+            string sqltable = ConfigurationManager.ConnectionStrings["SqlTable"].ConnectionString;
+            _sqlSchema = GetTableSchema(sqltable);
             var sqlHeaders = _sqlSchema.Rows.Cast<DataRow>().Select(r => r["ColumnName"].ToString()).ToList();
             lstSqlHeaders.DataSource = sqlHeaders;
 
