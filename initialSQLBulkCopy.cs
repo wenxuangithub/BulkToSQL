@@ -10,6 +10,7 @@ using System.Windows.Forms;
 using System.Data.SqlClient;
 using ClosedXML.Excel;
 using System.Configuration;
+using DocumentFormat.OpenXml.Wordprocessing;
 
 
 namespace SQLBulkCopy
@@ -32,7 +33,6 @@ namespace SQLBulkCopy
         {
             try
             {
-                // Rename columns in Excel table to match SQL before import
                 foreach (var map in _columnMappings)
                 {
                     if (_excelTable.Columns.Contains(map.Key))
@@ -41,13 +41,82 @@ namespace SQLBulkCopy
                     }
                 }
 
+                foreach (var map in _columnMappings)
+                {
+                    var columnName = map.Value;
+
+                    if (_sqlSchema != null)
+                    {
+                        var row = _sqlSchema.Rows
+                            .Cast<DataRow>()
+                            .FirstOrDefault(r => r["ColumnName"].ToString() == columnName);
+
+                        if (row != null && row["DataType"] is Type type)
+                        {
+                            int maxLength = -1;
+
+                            if (type == typeof(string) && _sqlSchema.Columns.Contains("ColumnSize"))
+                            {
+                                var sizeObj = row["ColumnSize"];
+                                if (sizeObj != DBNull.Value)
+                                    maxLength = Convert.ToInt32(sizeObj);
+                            }
+
+                            foreach (DataRow dataRow in _excelTable.Rows)
+                            {
+                                var val = dataRow[columnName]?.ToString().Trim();
+
+                                // Handle BIT / BOOL
+                                if (type == typeof(bool))
+                                {
+                                    if (val?.ToLower() == "true" || val == "1")
+                                        dataRow[columnName] = true;
+                                    else if (val?.ToLower() == "false" || val == "0")
+                                        dataRow[columnName] = false;
+                                    else
+                                        dataRow[columnName] = DBNull.Value;
+                                }
+
+                                // Handle DATETIME
+                                else if (type == typeof(DateTime))
+                                {
+                                    if (DateTime.TryParse(val, out var parsedDate))
+                                        dataRow[columnName] = parsedDate;
+                                    else
+                                        dataRow[columnName] = DBNull.Value;
+                                }
+
+                                else if (type == typeof(string))
+                                {
+                                    if (string.IsNullOrWhiteSpace(val))
+                                    {
+                                        dataRow[columnName] = DBNull.Value;
+                                    }
+                                    else
+                                    {
+                                        val = val.Trim();
+
+                                        // Optional: truncate if longer than column size
+                                        if (maxLength > 0 && val.Length > maxLength)
+                                            val = val.Substring(0, maxLength);
+
+                                        dataRow[columnName] = val;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+
                 BulkInsertToSql(_excelTable);
                 MessageBox.Show("Import completed.");
                 lblStatus.Text = "Import completed ✔";
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Import failed: {ex.Message}");
+                ShowError("Import failed", ex);
                 lblStatus.Text = "Import failed ✖";
             }
         }
@@ -57,37 +126,87 @@ namespace SQLBulkCopy
         {
             var dt = new DataTable();
 
-            using var workbook = new XLWorkbook(filePath);
-            var ws = workbook.Worksheet(1);
-            var firstRow = ws.FirstRowUsed();
-            var headers = firstRow.Cells().Select(c => c.GetString().Trim()).ToList();
-
-            foreach (var h in headers)
-                dt.Columns.Add(h);
-
-            foreach (var row in ws.RowsUsed().Skip(1))
+            try
             {
-                var newRow = dt.NewRow();
-                for (int i = 0; i < headers.Count; i++)
-                    newRow[i] = row.Cell(i + 1).GetValue<string>();
-                dt.Rows.Add(newRow);
+                using var workbook = new XLWorkbook(filePath);
+                var ws = workbook.Worksheet(1);
+                var firstRow = ws.FirstRowUsed();
+                var headers = firstRow.Cells().Select(c => c.GetString().Trim()).ToList();
+
+                foreach (var h in headers)
+                    dt.Columns.Add(h);
+
+                foreach (var row in ws.RowsUsed().Skip(1))
+                {
+                    var newRow = dt.NewRow();
+                    for (int i = 0; i < headers.Count; i++)
+                        newRow[i] = row.Cell(i + 1).GetValue<string>();
+                    dt.Rows.Add(newRow);
+                }
             }
+            catch (Exception ex)
+            {
+                throw new ApplicationException("Failed to read Excel file", ex);
+            }
+
             return dt;
         }
+
+        private static DataTable ReadExcelSheet(string filePath, string sheetName)
+        {
+            var dt = new DataTable();
+
+            try
+            {
+                using var workbook = new XLWorkbook(filePath);
+                var ws = workbook.Worksheet(sheetName);
+                var firstRow = ws.FirstRowUsed();
+                var headers = firstRow.Cells().Select(c => c.GetString().Trim()).ToList();
+
+                foreach (var h in headers)
+                    dt.Columns.Add(h);
+
+                foreach (var row in ws.RowsUsed().Skip(1))
+                {
+                    var newRow = dt.NewRow();
+                    for (int i = 0; i < headers.Count; i++)
+                        newRow[i] = row.Cell(i + 1).GetValue<string>();
+                    dt.Rows.Add(newRow);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new ApplicationException($"Failed to read sheet: {sheetName}", ex);
+            }
+
+            return dt;
+        }
+
 
         private static DataTable GetTableSchema(string tableName)
         {
             string connString = ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString;
-            using var con = new SqlConnection(connString);
-            using var cmd = new SqlCommand($"SELECT TOP 0 * FROM {tableName}", con);
-            con.Open();
-            using var rdr = cmd.ExecuteReader(CommandBehavior.SchemaOnly);
-            return rdr.GetSchemaTable();
+
+            try
+            {
+                using var con = new SqlConnection(connString);
+                using var cmd = new SqlCommand($"SELECT TOP 0 * FROM {tableName}", con);
+                con.Open();
+                using var rdr = cmd.ExecuteReader(CommandBehavior.SchemaOnly);
+                return rdr.GetSchemaTable();
+            }
+            catch (Exception ex)
+            {
+                throw new ApplicationException($"Failed to get schema for table: {tableName}", ex);
+            }
         }
+
 
         private void ShowColumnMappingDialog(List<string> excelHeaders, List<string> sqlHeaders)
         {
-            var mappingForm = new Form { Text = "Map Excel Columns to SQL Columns", Width = 500, Height = 400 };
+            _columnMappings.Clear();
+
+            var mappingForm = new Form { Text = "Map Excel Columns to SQL Columns", Width = 600, Height = 450 };
             var dgv = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -95,13 +214,10 @@ namespace SQLBulkCopy
                 AllowUserToAddRows = false
             };
 
-            dgv.Columns.Clear();
-
             var excelCol = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Excel Header",
                 Name = "ExcelHeader",
-                DataPropertyName = "ExcelHeader",
                 ReadOnly = true
             };
 
@@ -113,12 +229,22 @@ namespace SQLBulkCopy
                 DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton
             };
 
+            var ignoreCol = new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "Ignore",
+                Name = "IgnoreColumn"
+            };
+
             dgv.Columns.Add(excelCol);
             dgv.Columns.Add(sqlCol);
+            dgv.Columns.Add(ignoreCol);
 
             foreach (var excel in excelHeaders)
             {
-                dgv.Rows.Add(excel);
+                var matchedSql = sqlHeaders.FirstOrDefault(sqlColName =>
+                    string.Equals(sqlColName, excel, StringComparison.OrdinalIgnoreCase));
+
+                var index = dgv.Rows.Add(excel, matchedSql ?? null, false);
             }
 
             var btnSave = new Button { Text = "Save Mapping", Dock = DockStyle.Bottom };
@@ -127,11 +253,13 @@ namespace SQLBulkCopy
                 _columnMappings.Clear();
                 foreach (DataGridViewRow row in dgv.Rows)
                 {
-                    if (row.IsNewRow) continue;
                     string excelHeader = row.Cells["ExcelHeader"].Value?.ToString();
                     string sqlHeader = row.Cells["SqlColumn"].Value?.ToString();
+                    bool ignore = Convert.ToBoolean(row.Cells["IgnoreColumn"].Value ?? false);
 
-                    if (!string.IsNullOrWhiteSpace(excelHeader) && !string.IsNullOrWhiteSpace(sqlHeader))
+                    if (!string.IsNullOrWhiteSpace(excelHeader) &&
+                        !string.IsNullOrWhiteSpace(sqlHeader) &&
+                        !ignore)
                     {
                         _columnMappings[excelHeader] = sqlHeader;
                     }
@@ -147,14 +275,16 @@ namespace SQLBulkCopy
             if (mappingForm.ShowDialog() == DialogResult.OK && ValidateMappedHeadersMatch(sqlHeaders))
             {
                 btnImport.Enabled = true;
-                lblStatus.Text = "Mapped headers matched – ready to import.";
+                lblStatus.Text = "Mapped headers ready to import.";
             }
             else
             {
                 btnImport.Enabled = false;
-                lblStatus.Text = "Header mapping incomplete.";
+                lblStatus.Text = "Header mapping incomplete or ignored.";
             }
         }
+
+
 
         //private static DataTable CreateMappingTable(List<string> excelHeaders)
         //{
@@ -179,51 +309,161 @@ namespace SQLBulkCopy
         private void BulkInsertToSql(DataTable dt)
         {
             string connString = ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString;
-            using var con = new SqlConnection(connString);
-            con.Open();
+            string tableName = ConfigurationManager.AppSettings["SqlTableName"];
 
-            using var bc = new SqlBulkCopy(con, SqlBulkCopyOptions.TableLock, null)
+            try
             {
-                DestinationTableName = "DemoUsers",
-                BatchSize = 5000,
-                BulkCopyTimeout = 0
-            };
+                using var con = new SqlConnection(connString);
+                con.Open();
 
-            foreach (DataColumn col in dt.Columns)
-            {
-                bc.ColumnMappings.Add(col.ColumnName, col.ColumnName);
+                using var bc = new SqlBulkCopy(con, SqlBulkCopyOptions.TableLock, null)
+                {
+                    DestinationTableName = tableName,
+                    BatchSize = 5000,
+                    BulkCopyTimeout = 0
+                };
+
+                // Add only mapped columns
+                foreach (var map in _columnMappings)
+                {
+                    if (dt.Columns.Contains(map.Key))
+                    {
+                        bc.ColumnMappings.Add(map.Key, map.Value);
+                    }
+                }
+
+                // Clone DataTable to contain only mapped columns
+                var filteredTable = dt.DefaultView.ToTable(false, _columnMappings.Keys.ToArray());
+                bc.WriteToServer(filteredTable);
             }
-
-            bc.WriteToServer(dt);
+            catch (Exception ex)
+            {
+                throw new ApplicationException("Bulk insert failed", ex);
+            }
         }
+
 
         private void btnGetSqlSchema_Click(object sender, EventArgs e)
         {
-            string sqltable = ConfigurationManager.ConnectionStrings["SqlTable"].ConnectionString;
-            _sqlSchema = GetTableSchema(sqltable);
-            var sqlHeaders = _sqlSchema.Rows.Cast<DataRow>().Select(r => r["ColumnName"].ToString()).ToList();
-            lstSqlHeaders.DataSource = sqlHeaders;
+            try
+            {
+                string tableName = ConfigurationManager.AppSettings["SqlTableName"];
+                _sqlSchema = GetTableSchema(tableName);
 
-            var excelHeaders = _excelTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
+                var sqlHeaders = _sqlSchema.Rows
+                    .Cast<DataRow>()
+                    .Select(r => r["ColumnName"].ToString())
+                    .ToList();
 
-            ShowColumnMappingDialog(excelHeaders, sqlHeaders);
+                lstSqlHeaders.DataSource = sqlHeaders;
+
+                var excelHeaders = _excelTable.Columns
+                    .Cast<DataColumn>()
+                    .Select(c => c.ColumnName)
+                    .ToList();
+
+                ShowColumnMappingDialog(excelHeaders, sqlHeaders);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Failed to retrieve SQL schema", ex);
+            }
         }
 
         private void btnLoadExcel_Click(object sender, EventArgs e)
         {
-            using var ofd = new OpenFileDialog { Filter = "Excel Files|*.xlsx" };
-            if (ofd.ShowDialog() != DialogResult.OK) return;
+            try
+            {
+                using var ofd = new OpenFileDialog { Filter = "Excel Files|*.xlsx" };
+                if (ofd.ShowDialog() != DialogResult.OK) return;
 
-            _excelTable = ReadExcelFile(ofd.FileName);
-            lstExcelHeaders.DataSource = _excelTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
+                string filePath = ofd.FileName;
 
-            btnGetSqlSchema.Enabled = true;
-            lblStatus.Text = "Excel loaded – fetch SQL schema next.";
+                using var workbook = new XLWorkbook(filePath);
+                var sheetNames = workbook.Worksheets.Select(ws => ws.Name).ToList();
+
+                cmbSheets.Items.Clear();
+                cmbSheets.Items.AddRange(sheetNames.ToArray());
+                cmbSheets.Tag = filePath;
+
+                if (sheetNames.Any())
+                {
+                    cmbSheets.SelectedIndex = 0;
+                }
+
+                lblStatus.Text = "Excel loaded – select a sheet to preview.";
+            }
+            catch (Exception ex)
+            {
+                ShowError("Failed to load Excel file", ex);
+            }
         }
+
 
         private void lblStatus_Click(object sender, EventArgs e)
         {
 
+        }
+
+        private void ShowError(string title, Exception ex)
+        {
+            MessageBox.Show($"{title}:\n{ex.Message}\n\n{ex.InnerException?.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblStatus.Text = $"{title} ✖";
+        }
+
+        private void cmbSheets_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                string filePath = cmbSheets.Tag?.ToString();
+                string selectedSheet = cmbSheets.SelectedItem?.ToString();
+
+                if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(selectedSheet))
+                    return;
+
+                _excelTable = ReadExcelSheet(filePath, selectedSheet);
+
+                lstExcelHeaders.Items.Clear();
+                foreach (DataColumn column in _excelTable.Columns)
+                {
+                    lstExcelHeaders.Items.Add(column.ColumnName);
+                }
+
+                btnGetSqlSchema.Enabled = true;
+                lblStatus.Text = $"Preview loaded from sheet: {selectedSheet}";
+            }
+            catch (Exception ex)
+            {
+                ShowError("Failed to preview selected sheet", ex);
+            }
+        }
+
+        private void btnColumnMapping_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (_excelTable == null || _sqlSchema == null)
+                {
+                    MessageBox.Show("Load Excel and SQL schema first.", "Missing Data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var excelHeaders = _excelTable.Columns
+                    .Cast<DataColumn>()
+                    .Select(c => c.ColumnName)
+                    .ToList();
+
+                var sqlHeaders = _sqlSchema.Rows
+                    .Cast<DataRow>()
+                    .Select(r => r["ColumnName"].ToString())
+                    .ToList();
+
+                ShowColumnMappingDialog(excelHeaders, sqlHeaders);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Failed to open mapping dialog", ex);
+            }
         }
 
     }

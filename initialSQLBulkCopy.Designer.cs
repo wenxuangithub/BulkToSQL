@@ -34,11 +34,13 @@
             lstExcelHeaders = new ListBox();
             lstSqlHeaders = new ListBox();
             lblStatus = new Label();
+            cmbSheets = new ComboBox();
+            btnColumnMapping = new Button();
             SuspendLayout();
             // 
             // btnImport
             // 
-            btnImport.Location = new Point(422, 262);
+            btnImport.Location = new Point(570, 164);
             btnImport.Name = "btnImport";
             btnImport.Size = new Size(93, 23);
             btnImport.TabIndex = 0;
@@ -48,7 +50,7 @@
             // 
             // btnLoadExcel
             // 
-            btnLoadExcel.Location = new Point(57, 182);
+            btnLoadExcel.Location = new Point(146, 236);
             btnLoadExcel.Name = "btnLoadExcel";
             btnLoadExcel.Size = new Size(75, 23);
             btnLoadExcel.TabIndex = 1;
@@ -58,7 +60,7 @@
             // 
             // btnGetSqlSchema
             // 
-            btnGetSqlSchema.Location = new Point(40, 241);
+            btnGetSqlSchema.Location = new Point(394, 236);
             btnGetSqlSchema.Name = "btnGetSqlSchema";
             btnGetSqlSchema.Size = new Size(110, 44);
             btnGetSqlSchema.TabIndex = 2;
@@ -70,34 +72,57 @@
             // 
             lstExcelHeaders.FormattingEnabled = true;
             lstExcelHeaders.ItemHeight = 15;
-            lstExcelHeaders.Location = new Point(225, 51);
+            lstExcelHeaders.Location = new Point(146, 128);
             lstExcelHeaders.Name = "lstExcelHeaders";
-            lstExcelHeaders.Size = new Size(120, 94);
+            lstExcelHeaders.Size = new Size(153, 94);
             lstExcelHeaders.TabIndex = 3;
             // 
             // lstSqlHeaders
             // 
             lstSqlHeaders.FormattingEnabled = true;
             lstSqlHeaders.ItemHeight = 15;
-            lstSqlHeaders.Location = new Point(225, 215);
+            lstSqlHeaders.Location = new Point(386, 128);
             lstSqlHeaders.Name = "lstSqlHeaders";
-            lstSqlHeaders.Size = new Size(120, 94);
+            lstSqlHeaders.Size = new Size(156, 94);
             lstSqlHeaders.TabIndex = 4;
             // 
             // lblStatus
             // 
             lblStatus.AutoSize = true;
-            lblStatus.Location = new Point(446, 168);
+            lblStatus.Location = new Point(59, 79);
             lblStatus.Name = "lblStatus";
             lblStatus.Size = new Size(35, 15);
             lblStatus.TabIndex = 5;
             lblStatus.Text = "Label";
+            // 
+            // cmbSheets
+            // 
+            cmbSheets.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbSheets.FormattingEnabled = true;
+            cmbSheets.Location = new Point(146, 276);
+            cmbSheets.Name = "cmbSheets";
+            cmbSheets.Size = new Size(121, 23);
+            cmbSheets.TabIndex = 6;
+            cmbSheets.SelectedIndexChanged += cmbSheets_SelectedIndexChanged;
+            // 
+            // btnColumnMapping
+            // 
+            btnColumnMapping.Enabled = false;
+            btnColumnMapping.Location = new Point(305, 149);
+            btnColumnMapping.Name = "btnColumnMapping";
+            btnColumnMapping.Size = new Size(75, 52);
+            btnColumnMapping.TabIndex = 7;
+            btnColumnMapping.Text = "Column Mapping";
+            btnColumnMapping.UseVisualStyleBackColor = true;
+            btnColumnMapping.Click += btnColumnMapping_Click;
             // 
             // initialSQLBulkCopy
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(800, 450);
+            Controls.Add(btnColumnMapping);
+            Controls.Add(cmbSheets);
             Controls.Add(lblStatus);
             Controls.Add(lstSqlHeaders);
             Controls.Add(lstExcelHeaders);
@@ -118,5 +143,7 @@
         private ListBox lstExcelHeaders;
         private ListBox lstSqlHeaders;
         private Label lblStatus;
+        private ComboBox cmbSheets;
+        private Button btnColumnMapping;
     }
 }
