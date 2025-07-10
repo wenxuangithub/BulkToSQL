@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using ClosedXML.Excel;
 using System.Configuration;
 using DocumentFormat.OpenXml.Wordprocessing;
