@@ -3,7 +3,7 @@
 	<connectionStrings>
 		<add name="DefaultConnection"
 			 connectionString="Server=ServerAddress;Database=DBName;User Id=YourId;Password=YourPassword;"
-			 providerName="System.Data.SqlClient" />
+			 providerName="Microsoft.Data.SqlClient" />
 		<add name="SqlTable" connectionString="TableName"/>
 	</connectionStrings>
 </configuration>
