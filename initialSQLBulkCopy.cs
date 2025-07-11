@@ -8,9 +8,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Data.SqlClient;
-using ClosedXML.Excel;
+using ExcelDataReader;
 using System.Configuration;
-using DocumentFormat.OpenXml.Wordprocessing;
 
 
 namespace SQLBulkCopy
@@ -18,6 +17,7 @@ namespace SQLBulkCopy
     public partial class initialSQLBulkCopy : Form
     {
         private DataTable _excelTable;
+        private DataSet _excelDataSet;
         private DataTable _sqlSchema;
         private Dictionary<string, string> _columnMappings = new();
 
@@ -124,62 +124,35 @@ namespace SQLBulkCopy
 
         private static DataTable ReadExcelFile(string filePath)
         {
-            var dt = new DataTable();
-
-            try
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read);
+            using var reader = ExcelReaderFactory.CreateReader(stream);
+            var result = reader.AsDataSet(new ExcelDataSetConfiguration
             {
-                using var workbook = new XLWorkbook(filePath);
-                var ws = workbook.Worksheet(1);
-                var firstRow = ws.FirstRowUsed();
-                var headers = firstRow.Cells().Select(c => c.GetString().Trim()).ToList();
-
-                foreach (var h in headers)
-                    dt.Columns.Add(h);
-
-                foreach (var row in ws.RowsUsed().Skip(1))
+                ConfigureDataTable = (_) => new ExcelDataTableConfiguration
                 {
-                    var newRow = dt.NewRow();
-                    for (int i = 0; i < headers.Count; i++)
-                        newRow[i] = row.Cell(i + 1).GetValue<string>();
-                    dt.Rows.Add(newRow);
+                    UseHeaderRow = true
                 }
-            }
-            catch (Exception ex)
-            {
-                throw new ApplicationException("Failed to read Excel file", ex);
-            }
+            });
 
-            return dt;
+            return result.Tables[0];
         }
 
         private static DataTable ReadExcelSheet(string filePath, string sheetName)
         {
-            var dt = new DataTable();
-
-            try
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read);
+            using var reader = ExcelReaderFactory.CreateReader(stream);
+            var result = reader.AsDataSet(new ExcelDataSetConfiguration
             {
-                using var workbook = new XLWorkbook(filePath);
-                var ws = workbook.Worksheet(sheetName);
-                var firstRow = ws.FirstRowUsed();
-                var headers = firstRow.Cells().Select(c => c.GetString().Trim()).ToList();
-
-                foreach (var h in headers)
-                    dt.Columns.Add(h);
-
-                foreach (var row in ws.RowsUsed().Skip(1))
+                ConfigureDataTable = (_) => new ExcelDataTableConfiguration
                 {
-                    var newRow = dt.NewRow();
-                    for (int i = 0; i < headers.Count; i++)
-                        newRow[i] = row.Cell(i + 1).GetValue<string>();
-                    dt.Rows.Add(newRow);
+                    UseHeaderRow = true
                 }
-            }
-            catch (Exception ex)
-            {
-                throw new ApplicationException($"Failed to read sheet: {sheetName}", ex);
-            }
+            });
 
-            return dt;
+            return result.Tables.Cast<DataTable>().FirstOrDefault(t => t.TableName == sheetName)
+                   ?? throw new ApplicationException($"Sheet '{sheetName}' not found in the file.");
         }
 
 
@@ -370,6 +343,21 @@ namespace SQLBulkCopy
             }
         }
 
+        private static DataSet LoadExcelDataSet(string filePath)
+        {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read);
+            using var reader = ExcelReaderFactory.CreateReader(stream);
+            return reader.AsDataSet(new ExcelDataSetConfiguration
+            {
+                ConfigureDataTable = (_) => new ExcelDataTableConfiguration
+                {
+                    UseHeaderRow = true
+                }
+            });
+        }
+
+
         private void btnLoadExcel_Click(object sender, EventArgs e)
         {
             try
@@ -378,9 +366,9 @@ namespace SQLBulkCopy
                 if (ofd.ShowDialog() != DialogResult.OK) return;
 
                 string filePath = ofd.FileName;
+                _excelDataSet = LoadExcelDataSet(filePath);
 
-                using var workbook = new XLWorkbook(filePath);
-                var sheetNames = workbook.Worksheets.Select(ws => ws.Name).ToList();
+                var sheetNames = _excelDataSet.Tables.Cast<DataTable>().Select(t => t.TableName).ToList();
 
                 cmbSheets.Items.Clear();
                 cmbSheets.Items.AddRange(sheetNames.ToArray());
@@ -415,13 +403,12 @@ namespace SQLBulkCopy
         {
             try
             {
-                string filePath = cmbSheets.Tag?.ToString();
                 string selectedSheet = cmbSheets.SelectedItem?.ToString();
 
-                if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(selectedSheet))
+                if (_excelDataSet == null || string.IsNullOrWhiteSpace(selectedSheet))
                     return;
 
-                _excelTable = ReadExcelSheet(filePath, selectedSheet);
+                _excelTable = ReadExcelSheet(cmbSheets.Tag.ToString(), selectedSheet);
 
                 lstExcelHeaders.Items.Clear();
                 foreach (DataColumn column in _excelTable.Columns)
